@@ -60,7 +60,8 @@ let perEntryResponse = []
 let lineCount = 0
 let totalMockDifferenceTime = 0
 let transfersThatTakeLongerThanASecond = 0
-let beginTime = new Date().getTime()
+let beginTime = new Date()
+let timeForSimulatorList = []
 
 function compare (a, b) {
   const timestampA = a.timestamp
@@ -105,16 +106,46 @@ lr.on('line', function (line) {
         let mapOfLogs = new Map()
         for (var log of entry.entries) {
           if (log.process.includes('PRE-CALLBACK')) {
-            mapOfLogs.set(log.source, [log])
+            if (mapOfLogs.get(log.source)) {
+              var logs = mapOfLogs.get(log.source)
+              logs.push(log)
+              mapOfLogs.set(log.source, logs)
+            } else {
+              mapOfLogs.set(log.source, [log])
+            }
           } else if (log.process.includes('POST-CALLBACK')) {
             var logList = mapOfLogs.get(log.source)
             logList.push(log)
             mapOfLogs.set(log.source, logList)
+          } else if (log.process.includes(':fulfil - START')) {
+            if (mapOfLogs.get(log.source)) {
+              var listOfLogs = mapOfLogs.get(log.source)
+              listOfLogs.push(log)
+              mapOfLogs.set(log.source, listOfLogs)
+            } else {
+              mapOfLogs.set(log.source, [log])
+            }
           }
         }
+        let postPreCallBackLog = {}
         for (var value of mapOfLogs.values()) {
-          var preCallbackLog = value[0]
-          var postCallBackLog = value[1]
+          let preCallbackLog
+          let postCallBackLog
+          let simulatorProcessTimeLog
+          for (let entry of value) {
+            if (entry.process.includes('PRE-CALLBACK')) {
+              preCallbackLog = entry
+            } else if (entry.process.includes('POST-CALLBACK')) {
+              postCallBackLog = entry
+            } else if (entry.process.includes('fulfil - START')) {
+              simulatorProcessTimeLog = entry
+            }
+          }
+          if (!simulatorProcessTimeLog) {
+            postPreCallBackLog = preCallbackLog
+          } else {
+            timeForSimulatorList.push(new Date(simulatorProcessTimeLog.timestamp).getTime() - new Date(postPreCallBackLog.timestamp).getTime())
+          }
           mockTimeDifference += new Date(postCallBackLog.timestamp).getTime() - new Date(preCallbackLog.timestamp).getTime()
         }
         totalMockDifferenceTime += mockTimeDifference
@@ -145,6 +176,7 @@ lr.on('end', function () {
   const sortedPerEntryResponse = perEntryResponse.sort(compareNumbers)
   const shortestResponse = sortedPerEntryResponse[0]
   const longestResponse = sortedPerEntryResponse[perEntryResponse.length - 1]
+  const sortedTimeForSimulatorList = timeForSimulatorList.sort(compareNumbers)
 
   console.log('First request: ' + firstLine.timestamp)
   console.log('Last request: ' + lastLine.timestamp)
@@ -160,5 +192,9 @@ lr.on('end', function () {
   console.log(`% of entries that took longer than a second: ${(transfersThatTakeLongerThanASecond / totalTransactions * 100).toFixed(2)}%`)
   console.log('Estimate of average transactions per second: ' + (totalTransactions / (totalTime / 1000)))
   console.log('Total time waiting for mock server in milliseconds: ' + totalMockDifferenceTime)
-  console.log('Total time that script takes to run in seconds: ' + (new Date().getTime() - beginTime) / 1000)
+  console.log(`Started processing ${argv.file} at ${beginTime}`)
+  console.log('Total time that script takes to run in seconds: ' + (new Date().getTime() - beginTime.getTime()) / 1000)
+  console.log('Average time per transaction taken on simulator in milliseconds: ' + (timeForSimulatorList.reduce((a, b) => a + b) / timeForSimulatorList.length))
+  console.log('Shortest transaction time taken on simulator in milliseconds: ' + sortedTimeForSimulatorList[0])
+  console.log('Longest transaction time taken on simulator in milliseconds: ' + sortedTimeForSimulatorList[timeForSimulatorList.length - 1])
 })
